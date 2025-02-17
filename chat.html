@@ -32,85 +32,131 @@
             border: none;
             cursor: pointer;
         }
-        .message {
-            padding: 5px;
-            border-bottom: 1px solid #ddd;
-        }
     </style>
 </head>
 <body>
 
+<header>
     <h2>Chat Global</h2>
-    <div id="chat-box"></div>
-    <input type="text" id="message-input" placeholder="Escribe un mensaje...">
-    <button id="send-button">Enviar</button>
+</header>
 
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<div id="chat-box"></div>
+<input type="text" id="message-input" placeholder="Escribe un mensaje...">
+<button id="send-button">Enviar</button>
 
-    <script>
-        const firebaseConfig = {
-            apiKey: "AIzaSyAu0WbdAi8_yA2S6qKMUCLfty5w0PxgKVE",
-            authDomain: "anime-offis.firebaseapp.com",
-            projectId: "anime-offis",
-            storageBucket: "anime-offis.appspot.com",
-            messagingSenderId: "377121993034",
-            appId: "1:377121993034:web:a4ba7995e827bcbea411b3"
-        };
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyAu0WbdAi8_yA2S6qKMUCLfty5w0PxgKVE",
+        authDomain: "anime-offis.firebaseapp.com",
+        projectId: "anime-offis",
+        storageBucket: "anime-offis.appspot.com",
+        messagingSenderId: "377121993034",
+        appId: "1:377121993034:web:a4ba7995e827bcbea411b3"
+    };
 
-        const chatBox = document.getElementById('chat-box');
-        const messageInput = document.getElementById('message-input');
-        const sendButton = document.getElementById('send-button');
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    const messaging = firebase.messaging();
 
-        auth.onAuthStateChanged(user => {
-            if (!user) {
-                window.location.href = "login.html";
-            } else {
-                loadMessages();
-            }
-        });
+    const chatBox = document.getElementById('chat-box');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
 
-        function loadMessages() {
-            db.collection('globalChat').orderBy('timestamp').onSnapshot(snapshot => {
-                chatBox.innerHTML = "";
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    const messageElement = document.createElement('div');
-                    messageElement.classList.add('message');
-                    messageElement.textContent = `${data.username}: ${data.message}`;
-                    chatBox.appendChild(messageElement);
-                });
+    auth.onAuthStateChanged(user => {
+        if (!user) {
+            window.location.href = "login.html";
+        } else {
+            requestNotificationPermission();
+            loadMessages();
+        }
+    });
+
+    function loadMessages() {
+        db.collection('globalChat').orderBy('timestamp').onSnapshot(snapshot => {
+            chatBox.innerHTML = "";
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                const messageElement = document.createElement('div');
+                messageElement.textContent = `${data.username}: ${data.message}`;
+                chatBox.appendChild(messageElement);
                 chatBox.scrollTop = chatBox.scrollHeight;
             });
-        }
+        });
+    }
 
-        sendButton.addEventListener('click', () => {
-            const message = messageInput.value.trim();
-            if (message !== "") {
+    sendButton.addEventListener('click', () => {
+        const message = messageInput.value.trim();
+        if (message !== "") {
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    db.collection('users').doc(user.uid).get().then(doc => {
+                        if (doc.exists) {
+                            const userData = doc.data();
+                            db.collection('globalChat').add({
+                                username: userData.username,
+                                message: message,
+                                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                            }).then(() => {
+                                messageInput.value = "";
+                                sendNotification(userData.username, message);
+                            });
+                        }
+                    });
+                }
+            });
+        }
+    });
+
+    function sendNotification(username, message) {
+        db.collection('users').get().then(snapshot => {
+            snapshot.forEach(userDoc => {
+                const userData = userDoc.data();
+                if (userData.fcmToken) {
+                    fetch("https://fcm.googleapis.com/fcm/send", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": "BO2xvvsXYYX4X_eW_8aqsLYJIbL7MJ7kInOswXcN4fZbWX3IwChl_bk914PZwouOShya9OokTtf6vHc4X4uvU4I"
+                        },
+                        body: JSON.stringify({
+                            to: userData.fcmToken,
+                            notification: {
+                                title: `Nuevo mensaje de ${username}`,
+                                body: message,
+                                click_action: window.location.href
+                            }
+                        })
+                    });
+                }
+            });
+        });
+    }
+
+    function requestNotificationPermission() {
+        messaging.requestPermission()
+            .then(() => messaging.getToken())
+            .then(token => {
+                console.log("Token del dispositivo:", token);
                 auth.onAuthStateChanged(user => {
                     if (user) {
-                        db.collection('users').doc(user.uid).get().then(doc => {
-                            if (doc.exists) {
-                                const username = doc.data().username;
-                                db.collection('globalChat').add({
-                                    username: username,
-                                    message: message,
-                                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                                }).then(() => {
-                                    messageInput.value = "";
-                                });
-                            }
-                        });
+                        db.collection('users').doc(user.uid).update({ fcmToken: token });
                     }
                 });
-            }
-        });
-    </script>
+            })
+            .catch(error => console.error("No se pudo obtener el permiso de notificación:", error));
+    }
+
+    messaging.onMessage(payload => {
+        console.log("Notificación recibida:", payload);
+        alert(`Nuevo mensaje: ${payload.notification.body}`);
+    });
+</script>
 
 </body>
 </html>
